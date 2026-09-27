@@ -1,0 +1,293 @@
+// GGN Mobile & Electronic Service — Database Schema
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // change to "mysql" if using MySQL
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// AUTH / ADMIN
+// ---------------------------------------------------------------------------
+
+enum AdminRole {
+  SUPER_ADMIN
+  MANAGER
+  TECHNICIAN
+}
+
+model Admin {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(MANAGER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMERS
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  phone     String
+  email     String?
+  address   String?
+  createdAt DateTime  @default(now())
+
+  serviceRequests ServiceRequest[]
+  cctvRequests    CctvQuoteRequest[]
+  jobCards        JobCard[]
+  invoices        Invoice[]
+
+  @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+// SERVICE BOOKING (site section 8)
+// ---------------------------------------------------------------------------
+
+enum ServiceCategory {
+  MOBILE_REPAIR
+  CCTV
+  ELECTRONICS
+  HVAC
+  REFRIGERATOR
+  FAN
+  OTHER
+}
+
+enum RequestStatus {
+  NEW
+  CONTACTED
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model ServiceRequest {
+  id             String          @id @default(cuid())
+  requestCode    String          @unique // e.g. GGN-2026-0001
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  customerId     String
+  category       ServiceCategory
+  serviceType    String?
+  problemDesc    String
+  preferredDate  DateTime?
+  preferredTime  String?
+  address        String
+  mediaUrls      String[]        // photo/video attachments
+  status         RequestStatus   @default(NEW)
+  assignedTechId String?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  jobCard JobCard?
+}
+
+// ---------------------------------------------------------------------------
+// MOBILE REPAIR JOB CARD (site section 9)
+// ---------------------------------------------------------------------------
+
+enum RepairStatus {
+  RECEIVED
+  DIAGNOSIS
+  WAITING_FOR_PARTS
+  UNDER_REPAIR
+  TESTING
+  READY
+  DELIVERED
+}
+
+model JobCard {
+  id                 String         @id @default(cuid())
+  jobCode            String         @unique // e.g. GGN-JOB-2026-0001
+  serviceRequest     ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  serviceRequestId   String?        @unique
+  customer           Customer       @relation(fields: [customerId], references: [id])
+  customerId         String
+  deviceBrand        String
+  deviceModel         String
+  imei               String?
+  deviceColor        String?
+  accessoriesReceived String?
+  customerComplaint  String
+  physicalCondition  String?
+  estimatedCost      Decimal?       @db.Decimal(10, 2)
+  advancePayment     Decimal?       @db.Decimal(10, 2)
+  remainingAmount    Decimal?       @db.Decimal(10, 2)
+  technicianNotes    String?
+  status             RepairStatus   @default(RECEIVED)
+  dateReceived       DateTime       @default(now())
+  expectedDelivery   DateTime?
+  dateDelivered      DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// CCTV QUOTATION SYSTEM (site section 10)
+// ---------------------------------------------------------------------------
+
+enum PropertyType {
+  HOME
+  SHOP
+  SCHOOL
+  OFFICE
+  FACTORY
+  OTHER
+}
+
+enum CameraType {
+  ANALOG
+  IP
+  DOME
+  BULLET
+  PTZ
+}
+
+enum RecordingType {
+  DVR
+  NVR
+}
+
+model CctvQuoteRequest {
+  id            String        @id @default(cuid())
+  requestCode   String        @unique // e.g. GGN-CCTV-2026-0001
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  customerId    String
+  location      String
+  propertyType  PropertyType  @default(HOME)
+  cameraCount   Int
+  cameraType    CameraType    @default(DOME)
+  recording     RecordingType @default(DVR)
+  storage       String        // e.g. "2TB"
+  addons        String[]      // Monitor, UPS, PoE Switch, Cable, Rack, etc.
+  status        RequestStatus @default(NEW)
+  createdAt     DateTime      @default(now())
+
+  quotation Quotation?
+}
+
+model Quotation {
+  id               String            @id @default(cuid())
+  quotationCode    String            @unique
+  cctvRequest      CctvQuoteRequest  @relation(fields: [cctvRequestId], references: [id])
+  cctvRequestId    String            @unique
+  lineItems        Json              // [{ name, qty, unitPrice, total }]
+  subtotal         Decimal           @db.Decimal(10, 2)
+  discount         Decimal           @default(0) @db.Decimal(10, 2)
+  vat              Decimal           @default(0) @db.Decimal(10, 2)
+  total            Decimal           @db.Decimal(10, 2)
+  validUntil       DateTime?
+  preparedBy       String?
+  createdAt        DateTime          @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// INVENTORY (site section 24)
+// ---------------------------------------------------------------------------
+
+enum InventoryCategory {
+  MOBILE_PARTS
+  DISPLAYS
+  BATTERIES
+  CHARGING_CONNECTORS
+  IC_COMPONENTS
+  ACCESSORIES
+  CCTV_CAMERAS
+  DVR
+  NVR
+  HARD_DRIVES
+  CABLES
+  POWER_SUPPLIES
+  ELECTRONICS_PARTS
+  HVAC_PARTS
+}
+
+model InventoryItem {
+  id            String            @id @default(cuid())
+  productName   String
+  sku           String            @unique
+  category      InventoryCategory
+  brand         String?
+  purchasePrice Decimal           @db.Decimal(10, 2)
+  sellingPrice  Decimal           @db.Decimal(10, 2)
+  stock         Int               @default(0)
+  minimumStock  Int               @default(2)
+  supplier      String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// BILLING (site section 25)
+// ---------------------------------------------------------------------------
+
+enum PaymentMethod {
+  CASH
+  FONEPAY
+  BANK
+  ONLINE
+  OTHER
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  customerId    String
+  date          DateTime      @default(now())
+  lineItems     Json          // [{ description, qty, unitPrice, total }] — services + parts
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  tax           Decimal       @default(0) @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
+  paid          Decimal       @default(0) @db.Decimal(10, 2)
+  due           Decimal       @default(0) @db.Decimal(10, 2)
+  paymentMethod PaymentMethod @default(CASH)
+  createdAt     DateTime      @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// CONTENT: GALLERY, REVIEWS, FAQ, SERVICES, SETTINGS
+// ---------------------------------------------------------------------------
+
+model GalleryImage {
+  id        String   @id @default(cuid())
+  category  String   // Mobile Repair, CCTV Installation, Electronics, HVAC, Technician Work, Shop, Accessories
+  url       String
+  caption   String?
+  createdAt DateTime @default(now())
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  customerName String
+  rating     Int      // 1-5
+  reviewText String
+  verified   Boolean  @default(false)
+  visible    Boolean  @default(false) // admin must approve before showing on site
+  createdAt  DateTime @default(now())
+}
+
+model Faq {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  order     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model SiteSetting {
+  key   String @id
+  value String
+}
